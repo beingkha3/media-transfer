@@ -1,0 +1,80 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: media-transfer-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - internal
+
+  app:
+    build: ./app
+    container_name: media-transfer-app
+    environment:
+      - ZURG_ROOT=/zurg
+      - MOVIES_DEST=/dest/movies
+      - SHOWS_DEST=/dest/series
+      - GDRIVE_MOVIES_DEST=/gdrive/movies
+      - GDRIVE_SHOWS_DEST=/gdrive/series
+      - REDIS_URL=redis://redis:6379/0
+      # Simple built-in Basic Auth (recommended even behind NPM)
+      - BASIC_AUTH_USER=admin
+      - BASIC_AUTH_PASS=beingkha3#26
+      # Optional: if you want the worker to auto-refresh Jellyfin after copy (disabled by default)
+      - JELLYFIN_REFRESH_ENABLED=true
+      - JELLYFIN_URL=https://kazstream.kazrotech.homes
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - PROGRESS_MODE=both
+    volumes:
+      # Read Zurg mount (read-only)
+      - /mnt/zurg:/zurg:rshared,ro
+      # Write local destinations
+      - /root/docker/jellyfin/media/movies:/dest/movies:rw
+      - /root/docker/jellyfin/media/series:/dest/series:rw
+      - /mnt/gdrive/media/movies:/gdrive/movies:rshared,rw
+      - /mnt/gdrive/media/tvshows:/gdrive/series:rshared,rw
+      # Persistent state (optional, but nice for logs)
+      - ./data/app:/data
+    depends_on:
+      - redis
+    networks:
+      - internal
+      - proxy-tier
+    restart: unless-stopped
+
+  worker:
+    build: ./app
+    container_name: media-transfer-worker
+    environment:
+      - ZURG_ROOT=/zurg
+      - MOVIES_DEST=/dest/movies
+      - SHOWS_DEST=/dest/series
+      - GDRIVE_MOVIES_DEST=/gdrive/movies
+      - GDRIVE_SHOWS_DEST=/gdrive/series
+      - REDIS_URL=redis://redis:6379/0
+      - BASIC_AUTH_USER=${BASIC_AUTH_USER}
+      - BASIC_AUTH_PASS=${BASIC_AUTH_PASS}
+      - JELLYFIN_REFRESH_ENABLED=true
+      - JELLYFIN_URL=https://kazstream.kazrotech.homes
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - PROGRESS_MODE=both
+    volumes:
+      - /mnt/zurg:/zurg:rshared,rw
+      - /mnt/gdrive/media/movies:/gdrive/movies:rshared,rw
+      - /mnt/gdrive/media/tvshows:/gdrive/series:rshared,rw
+      - /root/docker/jellyfin/media/movies:/dest/movies:rw
+      - /root/docker/jellyfin/media/series:/dest/series:rw
+      - ./data/app:/data
+    depends_on:
+      - redis
+    networks:
+      - internal
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+
+networks:
+  internal:
+    driver: bridge
+  proxy-tier:
+    external: true
